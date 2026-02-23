@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 import openai
 from pydantic import BaseModel, Field
 
-from openreward.environments import Environment, JSONObject, TextBlock, ToolOutput, tool
+from openreward.environments import Environment, JSONObject, TextBlock, ToolOutput, tool, Split
 
 from constants import DATA_PATH
 from prompts import MATH_GRADER_TEMPLATE
@@ -70,7 +70,7 @@ class NemotronRLMathStackOverflow(Environment):
         Returns:
             ["train", "validation"]
         """
-        return ["train", "validation"]
+        return [Split(name="train", type="train"), Split(name="validation", type="validation")]
 
     @classmethod
     def list_tasks(cls, split: str) -> list[JSONObject]:
