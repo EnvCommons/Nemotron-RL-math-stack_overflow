@@ -2,3 +2,4 @@ openreward
 openai
 pydantic
 pyarrow
+pandas
