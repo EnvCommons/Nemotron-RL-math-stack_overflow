@@ -1,7 +1,6 @@
 # Nemotron-RL-Math-Stack-Overflow
 
-[![⭐ OpenReward Environment](https://img.shields.io/badge/%E2%AD%90%20OpenReward-Environment-f7e6cc)](https://openreward.ai/GeneralReasoning/nemotron_rl_math_stack_overflow)
-[![Hugging Face Dataset](https://img.shields.io/badge/Hugging%20Face-Dataset-orange)](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-stack_overflow)
+[![⭐ OpenReward Environment](https://img.shields.io/badge/%E2%AD%90%20OpenReward-Environment-f7e6cc)](https://openreward.ai/GeneralReasoning/nemotron_rl_math_stack_overflow) [![Hugging Face Dataset](https://img.shields.io/badge/Hugging%20Face-Dataset-orange)](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-stack_overflow)
 
 ## Description
 
@@ -15,7 +14,7 @@ Nemotron-RL-Math-Stack-Overflow is an environment for evaluating agents on mathe
 
 ## Compute Requirements
 
-Agents are given a standard sandbox environment. No special compute resources are required.
+This is a single-turn environment with no sandbox. No special compute resources are required.
 
 ## License
 
@@ -25,10 +24,8 @@ Agents are given a standard sandbox environment. No special compute resources ar
 
 There are two splits in this environment:
 
-- **Train**: Large-scale training set
-- **Validation**: Held-out validation set
-
-**Total: 436,307+ tasks**
+- **Train**: 436,307 tasks
+- **Validation**: 30 tasks
 
 Each task presents a math problem sourced from Stack Overflow and requires the agent to provide a final answer.
 
@@ -55,7 +52,7 @@ Source: [nvidia/Nemotron-RL-math-stack_overflow](https://huggingface.co/datasets
 
 ## Time Horizon
 
-Nemotron-RL-Math-Stack-Overflow is a single-turn environment. The agent receives a math problem and submits one answer.
+Nemotron-RL-Math-Stack-Overflow is a single-turn environment. The agent receives a math problem and submits one answer for a total of one tool call.
 
 ## Environment Difficulty
 
