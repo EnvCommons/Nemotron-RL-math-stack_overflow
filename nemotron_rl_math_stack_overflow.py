@@ -6,7 +6,10 @@ using LLM-based grading for flexible mathematical equivalence checking.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
+
 import pyarrow.parquet as pq
 import openai
 from pydantic import BaseModel, Field
@@ -17,18 +20,78 @@ from constants import DATA_PATH
 from prompts import MATH_GRADER_TEMPLATE
 
 
-# Load consolidated dataset at module import time (like mmlu_prox pattern)
-PARQUET_FILE = DATA_PATH / "nemotron_math_consolidated.parquet"
+# ---------------------------------------------------------------------------
+# Dataset loading from parquet (lazy, O(1) per-row access)
+# ---------------------------------------------------------------------------
 
-if PARQUET_FILE.exists():
-    TASKS_DF = pq.read_table(str(PARQUET_FILE)).to_pandas()
-    print(f"Loaded {len(TASKS_DF):,} tasks from {PARQUET_FILE}")
-else:
-    raise FileNotFoundError(
-        f"Data file not found: {PARQUET_FILE}\n\n"
-        f"For local dev: Run `python download_data.py` to generate the dataset\n"
-        f"For production: Upload nemotron_math_consolidated.parquet to /orwd_data/"
-    )
+PARQUET_FILE = DATA_PATH / "nemotron_math_consolidated.parquet"
+INDEX_PATH = DATA_PATH / "task_index.json"
+
+
+class _TaskIndex:
+    """Precomputed task index for O(1) lookups by split and index.
+
+    Built once by build_index.py, loaded lazily on first access.
+    Individual rows are fetched from parquet by targeting the exact row group.
+    """
+
+    def __init__(self, index_path: Path, parquet_path: Path):
+        raw = json.loads(index_path.read_text())
+        self._splits: dict[str, list[int]] = raw["splits"]
+        self._parquet_path = parquet_path
+
+    def num_tasks(self, split: str) -> int:
+        if split not in self._splits:
+            raise ValueError(f"Unknown split: {split!r}")
+        return len(self._splits[split])
+
+    def get_row(self, split: str, index: int) -> dict:
+        """Read a single row by split and index from the correct row group."""
+        if split not in self._splits:
+            raise ValueError(f"Unknown split: {split!r}")
+        indices = self._splits[split]
+        if index < 0 or index >= len(indices):
+            raise IndexError(
+                f"index {index} out of range (0..{len(indices) - 1})"
+            )
+        raw_idx = indices[index]
+        return self._read_row(self._parquet_path, raw_idx)
+
+    @staticmethod
+    def _read_row(path: Path, local_idx: int) -> dict:
+        """Read one row from a parquet file via its row group."""
+        pf = pq.ParquetFile(path)
+        offset = 0
+        for rg_idx in range(pf.metadata.num_row_groups):
+            rg_rows = pf.metadata.row_group(rg_idx).num_rows
+            if local_idx < offset + rg_rows:
+                rg_table = pf.read_row_group(rg_idx)
+                row = rg_table.slice(local_idx - offset, 1).to_pydict()
+                return {k: v[0] for k, v in row.items()}
+            offset += rg_rows
+        raise IndexError(f"row index {local_idx} not found in {path}")
+
+
+_dataset: _TaskIndex | None = None
+
+
+def _get_dataset() -> _TaskIndex:
+    """Lazy singleton for the task index."""
+    global _dataset
+    if _dataset is None:
+        if not INDEX_PATH.exists():
+            raise FileNotFoundError(
+                f"Task index not found: {INDEX_PATH}\n\n"
+                f"Run `python build_index.py` to generate it from the parquet file."
+            )
+        if not PARQUET_FILE.exists():
+            raise FileNotFoundError(
+                f"Data file not found: {PARQUET_FILE}\n\n"
+                f"For local dev: Run `python download_data.py` to generate the dataset\n"
+                f"For production: Upload nemotron_math_consolidated.parquet to /orwd_data/"
+            )
+        _dataset = _TaskIndex(INDEX_PATH, PARQUET_FILE)
+    return _dataset
 
 
 class TaskSpec(BaseModel):
@@ -65,45 +128,28 @@ class NemotronRLMathStackOverflow(Environment):
 
     @classmethod
     def list_splits(cls) -> list[str]:
-        """Return available splits.
-
-        Returns:
-            ["train", "validation"]
-        """
         return [Split(name="train", type="train"), Split(name="validation", type="validation")]
 
     @classmethod
     def list_tasks(cls, split: str) -> list[JSONObject]:
-        """Return task specifications for the given split.
+        raise NotImplementedError(
+            "Dataset has 436K+ tasks — use num_tasks/get_task instead"
+        )
 
-        Args:
-            split: Either "train" or "validation"
+    @classmethod
+    async def num_tasks(cls, split: str) -> int:
+        return _get_dataset().num_tasks(split)
 
-        Returns:
-            List of task specifications as dictionaries
-
-        Raises:
-            ValueError: If split is not "train" or "validation"
-        """
-        if split not in ["train", "validation"]:
-            raise ValueError(
-                f"Invalid split: {split}. Must be 'train' or 'validation'"
-            )
-
-        # Filter dataframe by split
-        filtered = TASKS_DF[TASKS_DF["split"] == split]
-
-        # Return task specs as dictionaries
-        return [
-            {
-                "task_id": row["task_id"],
-                "split": row["split"],
-                "question": row["question"],
-                "expected_answer": row["expected_answer"],
-                "row_idx": int(row["row_idx"])
-            }
-            for _, row in filtered.iterrows()
-        ]
+    @classmethod
+    async def get_task(cls, split: str, index: int) -> JSONObject:
+        row = _get_dataset().get_row(split, index)
+        return {
+            "task_id": row["task_id"],
+            "split": row["split"],
+            "question": row["question"],
+            "expected_answer": row["expected_answer"],
+            "row_idx": int(row["row_idx"]),
+        }
 
     def __init__(self, task_spec: JSONObject, secrets: dict[str, str] = {}) -> None:
         """Initialize the environment for a specific task.
