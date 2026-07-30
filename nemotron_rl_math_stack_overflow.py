@@ -169,7 +169,9 @@ class NemotronRLMathStackOverflow(Environment):
         if not api_key:
             raise ValueError("OpenAI API key must be provided via secrets parameter")
 
-        self.client = openai.AsyncClient(api_key=api_key)
+        # Bounded per-call timeout so a degraded endpoint fails fast; retries are
+        # handled by the loop in _grade_answer, not by the SDK.
+        self.client = openai.AsyncClient(api_key=api_key, timeout=120.0, max_retries=0)
 
     async def get_prompt(self) -> list[TextBlock]:
         """Generate the prompt for this math problem.
@@ -203,6 +205,10 @@ class NemotronRLMathStackOverflow(Environment):
 
         Returns:
             tuple[str, str]: (reasoning, grade) where grade is "CORRECT" or "INCORRECT"
+
+        Raises:
+            ValueError: If the response carries no valid CORRECT/INCORRECT grade, so
+                the caller can retry rather than treat it as a verdict.
         """
         # Extract reasoning
         reasoning_match = re.search(r'<reasoning>(.*?)</reasoning>', response, re.DOTALL | re.IGNORECASE)
@@ -214,8 +220,7 @@ class NemotronRLMathStackOverflow(Environment):
 
         # Validate answer
         if answer not in ["CORRECT", "INCORRECT"]:
-            print(f"Invalid grade in response: {answer}")
-            return reasoning or "Failed to parse grading response", "INCORRECT"
+            raise ValueError(f"No valid <answer> grade in grading response: {response!r:.500}")
 
         return reasoning, answer
 
@@ -228,9 +233,14 @@ class NemotronRLMathStackOverflow(Environment):
         Returns:
             tuple[str, str]: (reasoning, grade) where grade is "CORRECT" or "INCORRECT"
 
+        Raises:
+            RuntimeError: If grading fails on every attempt. A grader outage is not a
+                verdict on the answer, so it propagates and lets the platform retry
+                the tool call instead of scoring the rollout 0.0.
+
         Note:
             Uses gpt-5-mini with NO temperature parameter (per CLAUDE.md)
-            Includes retry loop for parsing failures
+            Retries both API errors and unparseable grader responses.
         """
         # Format grading prompt
         grader_prompt = MATH_GRADER_TEMPLATE.format(
@@ -238,8 +248,8 @@ class NemotronRLMathStackOverflow(Environment):
             student_answer=student_answer
         )
 
-        # Retry loop for parsing failures (like medrb)
         max_retries = 3
+        last_error: Exception | None = None
         for attempt in range(max_retries):
             try:
                 # Use gpt-5-mini with NO temperature parameter (per CLAUDE.md)
@@ -251,17 +261,15 @@ class NemotronRLMathStackOverflow(Environment):
                 grading_response = res.choices[0].message.content or ""
 
                 # Parse response with reasoning and answer tags
-                reasoning, grade = self._parse_grading_response(grading_response)
-
-                if grade in ["CORRECT", "INCORRECT"]:
-                    return reasoning, grade
+                return self._parse_grading_response(grading_response)
 
             except Exception as e:
+                last_error = e
                 print(f"Grading error (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt == max_retries - 1:
-                    return "Grading failed after retries", "INCORRECT"
 
-        return "Grading failed", "INCORRECT"
+        raise RuntimeError(
+            f"Grader failed after {max_retries} attempts: {last_error}"
+        ) from last_error
 
     @tool
     async def answer(self, params: AnswerInput) -> ToolOutput:
