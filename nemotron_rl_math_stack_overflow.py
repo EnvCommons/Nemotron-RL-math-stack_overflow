@@ -94,6 +94,11 @@ def _get_dataset() -> _TaskIndex:
     return _dataset
 
 
+# Reward for a submission made after the task has already been graded. Negative
+# so repeat submissions are actively discouraged, not merely left unscored.
+REPEAT_SUBMISSION_PENALTY = -0.1
+
+
 class TaskSpec(BaseModel):
     """Task specification for Nemotron math tasks."""
     task_id: str
@@ -163,6 +168,11 @@ class NemotronRLMathStackOverflow(Environment):
         """
         super().__init__(task_spec)
         self.validated = TaskSpec.model_validate(task_spec)
+
+        # Graded submissions this session. Only the first is rewarded: the
+        # feedback prints the expected answer, so an uncapped tool would let the
+        # agent read it and resubmit.
+        self.submitted = 0
 
         # CRITICAL: Use secrets parameter for API key (per CLAUDE.md)
         api_key = secrets.get("openai_api_key")
@@ -289,6 +299,16 @@ class NemotronRLMathStackOverflow(Environment):
             ToolOutput with correctness feedback, metadata, and binary reward
             (1.0 for correct, 0.0 for incorrect)
         """
+        if self.submitted > 0:
+            return ToolOutput(
+                metadata={"already_submitted": True, "submission_count": self.submitted},
+                blocks=[TextBlock(text="An answer has already been submitted for this task. "
+                                       "This episode is over: it is not re-graded, and repeat "
+                                       "submissions are penalised (reward -0.1).")],
+                reward=REPEAT_SUBMISSION_PENALTY,
+                finished=True,
+            )
+
         # Grade answer using LLM
         reasoning, grade = await self._grade_answer(params.answer)
         reward = 1.0 if grade == "CORRECT" else 0.0
@@ -304,6 +324,10 @@ class NemotronRLMathStackOverflow(Environment):
 
 **Reasoning**: {reasoning}
 """
+
+        # Incremented only after grading succeeds, so a grader failure (which
+        # raises) leaves the attempt retryable.
+        self.submitted += 1
 
         return ToolOutput(
             blocks=[TextBlock(text=result_text)],
