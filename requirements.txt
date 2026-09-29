@@ -1,4 +1,4 @@
-openreward
+openreward>=0.1.160
 openai
 pydantic
 pyarrow

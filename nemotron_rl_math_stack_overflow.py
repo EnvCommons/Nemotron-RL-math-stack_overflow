@@ -169,9 +169,8 @@ class NemotronRLMathStackOverflow(Environment):
         super().__init__(task_spec)
         self.validated = TaskSpec.model_validate(task_spec)
 
-        # Graded submissions this session. Only the first is rewarded: the
-        # feedback prints the expected answer, so an uncapped tool would let the
-        # agent read it and resubmit.
+        # Graded submissions this session. Only the first is rewarded, so the
+        # grader cannot be re-run for a second payout on the same task.
         self.submitted = 0
 
         # CRITICAL: Use secrets parameter for API key (per CLAUDE.md)
@@ -313,16 +312,14 @@ class NemotronRLMathStackOverflow(Environment):
         reasoning, grade = await self._grade_answer(params.answer)
         reward = 1.0 if grade == "CORRECT" else 0.0
 
-        # Format result message
+        # Format result message. The expected answer and the grader's reasoning
+        # (written with the expected answer in view) are not shown.
         result_text = f"""# Grading Results
 
 **Grade**: {grade}
 **Reward**: {reward}
 
 **Your Answer**: {params.answer}
-**Expected Answer**: {self.validated.expected_answer}
-
-**Reasoning**: {reasoning}
 """
 
         # Incremented only after grading succeeds, so a grader failure (which
@@ -335,9 +332,7 @@ class NemotronRLMathStackOverflow(Environment):
                 "task_id": self.validated.task_id,
                 "split": self.validated.split,
                 "submitted": params.answer,
-                "expected": self.validated.expected_answer,
                 "grade": grade,
-                "reasoning": reasoning,
                 "correct": grade == "CORRECT"
             },
             reward=reward,
