@@ -227,9 +227,12 @@ class NemotronRLMathStackOverflow(Environment):
         answer_match = re.search(r'<answer>(.*?)</answer>', response, re.DOTALL | re.IGNORECASE)
         answer = answer_match.group(1).strip().upper() if answer_match else ""
 
-        # Validate answer
+        # Validate answer. The raw response is logged, not put in the exception
+        # message: the message reaches the agent, and the response can restate
+        # the expected answer.
         if answer not in ["CORRECT", "INCORRECT"]:
-            raise ValueError(f"No valid <answer> grade in grading response: {response!r:.500}")
+            print(f"No valid <answer> grade in grading response: {response!r:.500}")
+            raise ValueError("Grader returned an unparseable response (no valid <answer> grade)")
 
         return reasoning, answer
 
