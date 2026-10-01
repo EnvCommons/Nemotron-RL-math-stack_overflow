@@ -27,6 +27,11 @@ from prompts import MATH_GRADER_TEMPLATE
 PARQUET_FILE = DATA_PATH / "nemotron_math_consolidated.parquet"
 INDEX_PATH = DATA_PATH / "task_index.json"
 
+# Bounds a grader reply. An uncapped reasoning trace can run for tens of minutes;
+# a capped one without a verdict is retried like any unparseable reply.
+GRADER_MAX_TOKENS = 16384
+GRADER_TIMEOUT_S = 600.0
+
 
 class _TaskIndex:
     """Precomputed task index for O(1) lookups by split and index.
@@ -178,9 +183,9 @@ class NemotronRLMathStackOverflow(Environment):
         if not api_key:
             raise ValueError("OpenAI API key must be provided via secrets parameter")
 
-        # Bounded per-call timeout so a degraded endpoint fails fast; retries are
-        # handled by the loop in _grade_answer, not by the SDK.
-        self.client = openai.AsyncClient(api_key=api_key, timeout=120.0, max_retries=0)
+        # The per-call timeout leaves room for a reply of GRADER_MAX_TOKENS on a busy
+        # endpoint; retries are handled by the loop in _grade_answer, not by the SDK.
+        self.client = openai.AsyncClient(api_key=api_key, timeout=GRADER_TIMEOUT_S, max_retries=0)
 
     async def get_prompt(self) -> list[TextBlock]:
         """Generate the prompt for this math problem.
@@ -267,7 +272,8 @@ class NemotronRLMathStackOverflow(Environment):
                 # Use gpt-5-mini with NO temperature parameter (per CLAUDE.md)
                 res = await self.client.chat.completions.create(
                     model="gpt-5-mini",
-                    messages=[{"role": "user", "content": grader_prompt}]
+                    messages=[{"role": "user", "content": grader_prompt}],
+                    max_completion_tokens=GRADER_MAX_TOKENS,
                 )
 
                 grading_response = res.choices[0].message.content or ""
