@@ -30,7 +30,20 @@ INDEX_PATH = DATA_PATH / "task_index.json"
 # Bounds a grader reply. An uncapped reasoning trace can run for tens of minutes;
 # a capped one without a verdict is retried like any unparseable reply.
 GRADER_MAX_TOKENS = 16384
-GRADER_TIMEOUT_S = 600.0
+# A reply with a verdict is a few thousand tokens; a call that runs past this is
+# either reasoning towards the cap (no verdict) or stuck, and is retried.
+GRADER_TIMEOUT_S = 180.0
+
+# (reasoning_effort, max_completion_tokens) per attempt. When the default effort
+# spends the whole token cap on reasoning, the reply has no verdict, and retrying
+# at the same effort tends to do the same. The later attempts use low effort,
+# which answers in a few hundred tokens and agrees with the default effort far
+# more often than minimal effort does.
+GRADER_ATTEMPTS: tuple[tuple[str | None, int], ...] = (
+    (None, GRADER_MAX_TOKENS),
+    ("low", 4096),
+    ("low", 4096),
+)
 
 
 class _TaskIndex:
@@ -183,8 +196,7 @@ class NemotronRLMathStackOverflow(Environment):
         if not api_key:
             raise ValueError("OpenAI API key must be provided via secrets parameter")
 
-        # The per-call timeout leaves room for a reply of GRADER_MAX_TOKENS on a busy
-        # endpoint; retries are handled by the loop in _grade_answer, not by the SDK.
+        # Retries are handled by the loop in _grade_answer, not by the SDK.
         self.client = openai.AsyncClient(api_key=api_key, timeout=GRADER_TIMEOUT_S, max_retries=0)
 
     async def get_prompt(self) -> list[TextBlock]:
@@ -241,19 +253,20 @@ class NemotronRLMathStackOverflow(Environment):
 
         return reasoning, answer
 
-    async def _grade_answer(self, student_answer: str) -> tuple[str, str]:
+    async def _grade_answer(self, student_answer: str) -> tuple[str, str] | None:
         """Grade student answer using LLM grader.
 
         Args:
             student_answer: The answer provided by the agent
 
         Returns:
-            tuple[str, str]: (reasoning, grade) where grade is "CORRECT" or "INCORRECT"
+            (reasoning, grade) where grade is "CORRECT" or "INCORRECT", or None if
+            the grader replied on every attempt but never gave a verdict.
 
         Raises:
-            RuntimeError: If grading fails on every attempt. A grader outage is not a
-                verdict on the answer, so it propagates and lets the platform retry
-                the tool call instead of scoring the rollout 0.0.
+            RuntimeError: If every attempt fails with an API error. A grader outage is
+                not a verdict on the answer, so it propagates and lets the platform
+                retry the tool call instead of scoring the rollout 0.0.
 
         Note:
             Uses gpt-5-mini with NO temperature parameter (per CLAUDE.md)
@@ -265,26 +278,37 @@ class NemotronRLMathStackOverflow(Environment):
             student_answer=student_answer
         )
 
-        max_retries = 3
+        max_retries = len(GRADER_ATTEMPTS)
         last_error: Exception | None = None
-        for attempt in range(max_retries):
+        replied_without_verdict = False
+        for attempt, (effort, max_tokens) in enumerate(GRADER_ATTEMPTS):
+            extra = {"reasoning_effort": effort} if effort else {}
             try:
                 # Use gpt-5-mini with NO temperature parameter (per CLAUDE.md)
                 res = await self.client.chat.completions.create(
                     model="gpt-5-mini",
                     messages=[{"role": "user", "content": grader_prompt}],
-                    max_completion_tokens=GRADER_MAX_TOKENS,
+                    max_completion_tokens=max_tokens,
+                    **extra,
                 )
-
                 grading_response = res.choices[0].message.content or ""
-
-                # Parse response with reasoning and answer tags
-                return self._parse_grading_response(grading_response)
-
+                finish_reason = res.choices[0].finish_reason
             except Exception as e:
                 last_error = e
                 print(f"Grading error (attempt {attempt + 1}/{max_retries}): {e}")
+                continue
 
+            try:
+                # Parse response with reasoning and answer tags
+                return self._parse_grading_response(grading_response)
+            except ValueError as e:
+                last_error = e
+                replied_without_verdict = True
+                print(f"Grading error (attempt {attempt + 1}/{max_retries}, "
+                      f"finish_reason={finish_reason}): {e}")
+
+        if replied_without_verdict:
+            return None
         raise RuntimeError(
             f"Grader failed after {max_retries} attempts: {last_error}"
         ) from last_error
@@ -318,7 +342,19 @@ class NemotronRLMathStackOverflow(Environment):
             )
 
         # Grade answer using LLM
-        reasoning, grade = await self._grade_answer(params.answer)
+        graded = await self._grade_answer(params.answer)
+        if graded is None:
+            # Nothing was graded, so the attempt is not used up.
+            return ToolOutput(
+                metadata={"graded": False, "submitted": params.answer},
+                blocks=[TextBlock(text="Your answer could not be graded: the grader gave no "
+                                       "verdict. Nothing was recorded and this attempt does not "
+                                       "count. Submit your final answer again with the `answer` "
+                                       "tool, stated concisely.")],
+                reward=0.0,
+                finished=False,
+            )
+        reasoning, grade = graded
         reward = 1.0 if grade == "CORRECT" else 0.0
 
         # Format result message. The expected answer and the grader's reasoning

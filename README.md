@@ -36,7 +36,7 @@ This is a single-turn environment with binary reward:
 - **1.0** — Correct answer (mathematically equivalent to the reference)
 - **0.0** — Incorrect answer
 
-Grading is performed by gpt-5-mini, which evaluates mathematical equivalence across different representations (e.g., `5/9` = `0.555...` = `\boxed{5/9}`). Includes a retry loop (3 attempts) for robust evaluation.
+Grading is performed by gpt-5-mini, which evaluates mathematical equivalence across different representations (e.g., `5/9` = `0.555...` = `\boxed{5/9}`). Includes a retry loop (3 attempts; the second and third use low reasoning effort) for robust evaluation. If the grader replies without a verdict on every attempt, the submission is not graded: the agent is told to resubmit, the episode continues, and the attempt does not count. If every attempt fails with an API error, the tool call raises.
 
 ## Data
 
