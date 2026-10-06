@@ -5,6 +5,8 @@ Run: uv run --no-project --with-requirements requirements.txt --with pytest pyth
 import asyncio
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 
 import nemotron_rl_math_stack_overflow as mod
@@ -21,12 +23,19 @@ class ScriptedClient:
         self.requests: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
-    async def _create(self, **kwargs):
-        self.requests.append(kwargs)
+    async def _create(self, *, model, messages, max_completion_tokens, reasoning_effort=None):
+        # Keyword-only, like the SDK's create(); an unexpected argument is a TypeError.
+        assert reasoning_effort in (None, "minimal", "low", "medium", "high")
+        self.requests.append({"model": model, "messages": messages,
+                              "max_completion_tokens": max_completion_tokens,
+                              "reasoning_effort": reasoning_effort})
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=reply))])
+        # An empty reply is what the API returns when reasoning uses up the token cap.
+        finish_reason = "stop" if reply else "length"
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content=reply), finish_reason=finish_reason)])
 
 
 def _env(replies: list) -> tuple[NemotronRLMathStackOverflow, ScriptedClient]:
@@ -58,9 +67,48 @@ def test_truncated_and_timed_out_replies_are_retried():
     assert out.reward == 0.0 and out.finished is True and len(client.requests) == 3
 
 
-def test_grader_failure_raises_without_reference_and_keeps_attempt():
-    env, client = _env(["", "", ""])
+def _timeout() -> Exception:
+    return openai.APITimeoutError(request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
+
+
+def test_grader_outage_raises_without_reference_and_keeps_attempt():
+    env, client = _env([_timeout(), _timeout(), _timeout()])
     with pytest.raises(RuntimeError) as exc:
         _answer(env)
     assert "Grader failed" in str(exc.value)
+    assert TASK["expected_answer"] not in str(exc.value)
     assert env.submitted == 0
+
+
+def test_client_timeout_is_bounded():
+    # Three attempts must fit well inside a tool call's budget.
+    assert mod.GRADER_TIMEOUT_S * len(mod.GRADER_ATTEMPTS) <= 600
+
+
+def test_verdictless_replies_are_not_graded_and_keep_attempt():
+    env, client = _env(["", "", "", "<reasoning>ok</reasoning><answer>CORRECT</answer>"])
+    out = _answer(env, "the agent's answer")
+    assert out.finished is False and out.reward == 0.0
+    assert out.metadata["graded"] is False
+    text = out.blocks[0].text + str(out.metadata)
+    assert "could not be graded" in text and "does not count" in text
+    assert TASK["expected_answer"] not in out.blocks[0].text
+    assert env.submitted == 0
+    # The resubmission is graded normally.
+    out = _answer(env)
+    assert out.finished is True and out.reward == 1.0 and env.submitted == 1
+
+
+def test_retry_after_a_verdictless_reply_uses_low_effort():
+    env, client = _env(["", "<reasoning>ok</reasoning><answer>INCORRECT</answer>"])
+    out = _answer(env)
+    assert out.finished is True and out.reward == 0.0
+    assert client.requests[0]["reasoning_effort"] is None
+    assert client.requests[0]["max_completion_tokens"] == mod.GRADER_MAX_TOKENS
+    assert client.requests[1]["reasoning_effort"] == "low"
+
+
+def test_verdictless_reply_then_outage_is_not_graded():
+    env, client = _env(["", _timeout(), _timeout()])
+    out = _answer(env)
+    assert out.finished is False and env.submitted == 0
