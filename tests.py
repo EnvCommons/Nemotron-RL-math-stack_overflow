@@ -112,3 +112,37 @@ def test_verdictless_reply_then_outage_is_not_graded():
     env, client = _env(["", _timeout(), _timeout()])
     out = _answer(env)
     assert out.finished is False and env.submitted == 0
+
+
+POKER = ("What is the probability that a 5-card poker hand contains no pairs, no runs of 5 "
+         "consecutive values, and not all 5 cards of the same suit?")
+
+
+class _Rows:
+    def __init__(self, row: dict) -> None:
+        self.row = row
+
+    def get_row(self, split: str, index: int) -> dict:
+        return dict(self.row)
+
+
+def _get_task(monkeypatch, row: dict) -> dict:
+    monkeypatch.setattr(mod, "_get_dataset", lambda: _Rows(row))
+    return asyncio.run(NemotronRLMathStackOverflow.get_task("train", 0))
+
+
+def test_wrong_poker_reference_is_corrected(monkeypatch):
+    from fractions import Fraction
+    from math import comb
+
+    # High-card hands: distinct ranks, not one of the 10 straights, not one of 4 flushes.
+    assert Fraction((comb(13, 5) - 10) * (4**5 - 4), comb(52, 5)) == Fraction(1277, 2548)
+    row = {"task_id": "train_21938", "split": "train", "question": POKER, "expected_answer": "0.507", "row_idx": 21938}
+    assert _get_task(monkeypatch, row)["expected_answer"] == "1277/2548"
+
+
+def test_correction_needs_the_matching_question(monkeypatch):
+    row = {"task_id": "train_21938", "split": "train", "question": "Another question?", "expected_answer": "0.507", "row_idx": 21938}
+    assert _get_task(monkeypatch, row)["expected_answer"] == "0.507"
+    row = {"task_id": "train_1", "split": "train", "question": "What is 1+1?", "expected_answer": "2", "row_idx": 1}
+    assert _get_task(monkeypatch, row)["expected_answer"] == "2"
