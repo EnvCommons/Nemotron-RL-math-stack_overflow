@@ -112,6 +112,20 @@ def _get_dataset() -> _TaskIndex:
     return _dataset
 
 
+# References that do not answer their question, keyed by task_id. Each entry is
+# (start of the question it applies to, corrected reference); a correction is
+# skipped if the row's question no longer matches.
+REFERENCE_CORRECTIONS: dict[str, tuple[str, str]] = {
+    # Five distinct ranks, not a straight (ace high or low), not a flush:
+    # (C(13,5) - 10) * (4^5 - 4) / C(52,5) = 1,302,540 / 2,598,960. The dataset's
+    # 0.507 is the probability of five distinct ranks alone.
+    "train_21938": (
+        "What is the probability that a 5-card poker hand contains no pairs, no runs of 5 consecutive values",
+        "1277/2548",
+    ),
+}
+
+
 # Reward for a submission made after the task has already been graded. Negative
 # so repeat submissions are actively discouraged, not merely left unscored.
 REPEAT_SUBMISSION_PENALTY = -0.1
@@ -166,11 +180,15 @@ class NemotronRLMathStackOverflow(Environment):
     @classmethod
     async def get_task(cls, split: str, index: int) -> JSONObject:
         row = _get_dataset().get_row(split, index)
+        expected_answer = row["expected_answer"]
+        correction = REFERENCE_CORRECTIONS.get(row["task_id"])
+        if correction and row["question"].startswith(correction[0]):
+            expected_answer = correction[1]
         return {
             "task_id": row["task_id"],
             "split": row["split"],
             "question": row["question"],
-            "expected_answer": row["expected_answer"],
+            "expected_answer": expected_answer,
             "row_idx": int(row["row_idx"]),
         }
 
