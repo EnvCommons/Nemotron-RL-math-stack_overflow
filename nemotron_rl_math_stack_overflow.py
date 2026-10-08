@@ -292,6 +292,7 @@ class NemotronRLMathStackOverflow(Environment):
         """
         # Format grading prompt
         grader_prompt = MATH_GRADER_TEMPLATE.format(
+            question=self.validated.question,
             reference_answer=self.validated.expected_answer,
             student_answer=student_answer
         )
