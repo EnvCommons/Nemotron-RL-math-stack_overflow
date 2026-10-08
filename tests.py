@@ -146,3 +146,27 @@ def test_correction_needs_the_matching_question(monkeypatch):
     assert _get_task(monkeypatch, row)["expected_answer"] == "0.507"
     row = {"task_id": "train_1", "split": "train", "question": "What is 1+1?", "expected_answer": "2", "row_idx": 1}
     assert _get_task(monkeypatch, row)["expected_answer"] == "2"
+
+
+COUNTEREXAMPLE = {
+    "task_id": "t1",
+    "question": "Provide a counterexample to the conjecture that if \\( a^2 > b^2 \\) for real numbers "
+                "\\( a \\) and \\( b \\), then \\( a > b \\). Use the set {a, b}.",
+    "expected_answer": "\\( a = -3 \\), \\( b = 2 \\)",
+    "split": "train",
+    "row_idx": 1,
+}
+
+
+def test_grader_sees_the_question_and_accepts_other_valid_answers():
+    # Without the question the grader can only compare to the one reference
+    # counterexample, so a different valid counterexample is graded by chance.
+    env = NemotronRLMathStackOverflow(task_spec=COUNTEREXAMPLE, secrets={"openai_api_key": "test"})
+    env.client = client = ScriptedClient(["<reasoning>ok</reasoning><answer>CORRECT</answer>"])
+    out = _answer(env, "a = -1, b = 0")
+    assert out.reward == 1.0
+    prompt = client.requests[0]["messages"][0]["content"]
+    assert COUNTEREXAMPLE["question"] in prompt
+    assert prompt.index(COUNTEREXAMPLE["question"]) < prompt.index(COUNTEREXAMPLE["expected_answer"])
+    assert "more than one correct answer" in prompt and "does not need to match the reference" in prompt
+    assert "a = -1, b = 0" in prompt

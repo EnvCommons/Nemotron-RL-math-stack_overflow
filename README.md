@@ -33,10 +33,10 @@ Each task presents a math problem sourced from Stack Overflow and requires the a
 
 This is a single-turn environment with binary reward:
 
-- **1.0** — Correct answer (mathematically equivalent to the reference)
+- **1.0** — Correct answer (mathematically equivalent to the reference; for a question that asks for any one example or counterexample, any answer that satisfies the question)
 - **0.0** — Incorrect answer
 
-Grading is performed by gpt-5-mini, which evaluates mathematical equivalence across different representations (e.g., `5/9` = `0.555...` = `\boxed{5/9}`). Includes a retry loop (3 attempts; the second and third use low reasoning effort) for robust evaluation. If the grader replies without a verdict on every attempt, the submission is not graded: the agent is told to resubmit, the episode continues, and the attempt does not count. If every attempt fails with an API error, the tool call raises.
+Grading is performed by gpt-5-mini, which evaluates mathematical equivalence across different representations (e.g., `5/9` = `0.555...` = `\boxed{5/9}`). The grader sees the question as well as the reference, so that when the question admits many correct answers (e.g. "provide a counterexample") it checks the student's answer against the question rather than against the single reference. Includes a retry loop (3 attempts; the second and third use low reasoning effort) for robust evaluation. If the grader replies without a verdict on every attempt, the submission is not graded: the agent is told to resubmit, the episode continues, and the attempt does not count. If every attempt fails with an API error, the tool call raises.
 
 ## Data
 

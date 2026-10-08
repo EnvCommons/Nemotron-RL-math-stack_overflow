@@ -1,6 +1,9 @@
 """Grading prompt template for Nemotron-RL-Math-Stack-Overflow evaluation."""
 
-MATH_GRADER_TEMPLATE = """You are evaluating a mathematical answer against a reference answer.
+MATH_GRADER_TEMPLATE = """You are evaluating a student's answer to a math question against a reference answer.
+
+# Question:
+{question}
 
 # Reference Answer:
 {reference_answer}
@@ -27,6 +30,11 @@ Your task is to determine if the student's answer is **mathematically equivalent
 - Wrong sign (positive vs negative)
 - Different mathematical object (e.g., giving a number when answer should be a set)
 - Units don't match (if units are specified)
+
+**Questions with more than one correct answer:**
+If the question asks for any one object with a stated property (for example "give an example", "provide a counterexample", "find a function such that"), the reference is only one of many correct answers. Grade CORRECT if the student's answer satisfies every condition in the question (check this yourself); it does not need to match the reference. Grade INCORRECT if it fails any condition.
+
+For every other question, grade the student's answer against the reference answer as described above. Do not re-solve the question or overrule the reference.
 
 **Important Notes:**
 - Ignore formatting differences (spaces, parentheses, LaTeX notation)
