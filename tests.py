@@ -3,6 +3,7 @@
 Run: uv run --no-project --with-requirements requirements.txt --with pytest python -m pytest tests.py -q
 """
 import asyncio
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -170,3 +171,41 @@ def test_grader_sees_the_question_and_accepts_other_valid_answers():
     assert prompt.index(COUNTEREXAMPLE["question"]) < prompt.index(COUNTEREXAMPLE["expected_answer"])
     assert "more than one correct answer" in prompt and "does not need to match the reference" in prompt
     assert "a = -1, b = 0" in prompt
+
+
+COMBINATIONS = ("How many possible combinations are there if you have 95 possibilities and 63 slots to fill, "
+                "where the choices can repeat and order matters?")
+BEAM = ("Solve the partial differential equation \\( u_{tt} = u_{xxxx} \\) for \\( t > 0 \\) with the initial "
+        "conditions \\( u(0,x) = p(x) \\) and \\( u_t(0,x) = 0 \\) using the Fourier Transform.")
+
+
+def test_wrong_combinations_reference_is_corrected(monkeypatch):
+    # The dataset's reference sums every length from 1 to 63 slots.
+    assert (95**64 - 95) // 94 == sum(95**k for k in range(1, 64)) != 95**63
+    row = {"task_id": "train_188208", "split": "train", "question": COMBINATIONS,
+           "expected_answer": "\\(\\frac{95^{64}-95}{94}\\)", "row_idx": 188208}
+    assert _get_task(monkeypatch, row)["expected_answer"] == "\\(95^{63}\\)"
+
+
+def test_wrong_fourier_pde_reference_is_corrected(monkeypatch):
+    sp = pytest.importorskip("sympy")
+    t, x, k = sp.symbols("t x k", real=True)
+    mode = lambda f: f(k**2 * t) * sp.exp(sp.I * k * x)
+    pde = lambda u: sp.simplify(sp.diff(u, t, 2) - sp.diff(u, x, 4))
+    assert pde(mode(sp.cosh)) == 0 and pde(mode(sp.cos)) != 0
+    row = {"task_id": "train_80384", "split": "train", "question": BEAM,
+           "expected_answer": "\\( u(t,x) = \\mathcal{F}^{-1}\\left[F(p(x))\\cos(k^2t)\\right] \\)", "row_idx": 80384}
+    ref = _get_task(monkeypatch, row)["expected_answer"]
+    assert "\\cosh(k^2t)" in ref and "\\cos(" not in ref
+
+
+def test_excluded_task_is_dropped_and_later_tasks_shift(tmp_path):
+    rows = list(range(377_715))
+    index = tmp_path / "task_index.json"
+    index.write_text(json.dumps({"splits": {"train": rows, "validation": [377_715, 377_716]}}))
+    tasks = mod._TaskIndex(index, tmp_path / "unused.parquet")
+    assert tasks.num_tasks("train") == len(rows) - 1
+    assert tasks.num_tasks("validation") == 2
+    train = tasks._splits["train"]
+    assert 377_710 not in train
+    assert train[377_709] == 377_709 and train[377_710] == 377_711
