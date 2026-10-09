@@ -24,7 +24,7 @@ This is a single-turn environment with no sandbox. No special compute resources 
 
 There are two splits in this environment:
 
-- **Train**: 436,307 tasks
+- **Train**: 436,306 tasks (one ambiguous dataset row is left out)
 - **Validation**: 30 tasks
 
 Each task presents a math problem sourced from Stack Overflow and requires the agent to provide a final answer.

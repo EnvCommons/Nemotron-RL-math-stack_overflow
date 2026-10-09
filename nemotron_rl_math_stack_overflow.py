@@ -46,6 +46,17 @@ GRADER_ATTEMPTS: tuple[tuple[str | None, int], ...] = (
 )
 
 
+# Tasks left out of their split, by position in the published split (task_id is
+# f"{split}_{position}"). Removing one renumbers every later task in that split.
+EXCLUDED_TASKS: dict[str, frozenset[int]] = {
+    # "Paths in an n x m grid (n, m coprime) that do not cross the diagonal": the
+    # reference 2/(m+n) * C(m+n, n) counts paths on either side of the diagonal,
+    # while 1/(m+n) * C(m+n, n) counts paths on one side. The question does not
+    # say which is meant.
+    "train": frozenset({377710}),
+}
+
+
 class _TaskIndex:
     """Precomputed task index for O(1) lookups by split and index.
 
@@ -55,7 +66,10 @@ class _TaskIndex:
 
     def __init__(self, index_path: Path, parquet_path: Path):
         raw = json.loads(index_path.read_text())
-        self._splits: dict[str, list[int]] = raw["splits"]
+        self._splits: dict[str, list[int]] = {
+            split: [row for pos, row in enumerate(rows) if pos not in EXCLUDED_TASKS.get(split, ())]
+            for split, rows in raw["splits"].items()
+        }
         self._parquet_path = parquet_path
 
     def num_tasks(self, split: str) -> int:
@@ -122,6 +136,18 @@ REFERENCE_CORRECTIONS: dict[str, tuple[str, str]] = {
     "train_21938": (
         "What is the probability that a 5-card poker hand contains no pairs, no runs of 5 consecutive values",
         "1277/2548",
+    ),
+    # 63 slots, each one of 95 choices: 95^63. The dataset's (95^64 - 95)/94 sums
+    # 95^k over every length k from 1 to 63.
+    "train_188208": (
+        "How many possible combinations are there if you have 95 possibilities and 63 slots to fill",
+        "\\(95^{63}\\)",
+    ),
+    # The Fourier transform turns u_tt = u_xxxx into U_tt = k^4 U; with U_t(0) = 0
+    # that gives U = P cosh(k^2 t). The dataset's cos(k^2 t) solves u_tt = -u_xxxx.
+    "train_80384": (
+        "Solve the partial differential equation \\( u_{tt} = u_{xxxx} \\) for \\( t > 0 \\) with the initial conditions \\( u(0,x) = p(x) \\) and \\( u_t(0,x) = 0 \\)",
+        "\\( u(t,x) = \\mathcal{F}^{-1}\\left[F(p(x))\\cosh(k^2t)\\right] \\)",
     ),
 }
 
