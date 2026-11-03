@@ -1,6 +1,6 @@
 # Nemotron-RL-Math-Stack-Overflow
 
-[![⭐ OpenReward Environment](https://img.shields.io/badge/%E2%AD%90%20OpenReward-Environment-f7e6cc)](https://openreward.ai/GeneralReasoning/nemotron_rl_math_stack_overflow) [![Hugging Face Dataset](https://img.shields.io/badge/Hugging%20Face-Dataset-orange)](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-stack_overflow)
+[![⭐ OpenReward Environment](https://img.shields.io/badge/%E2%AD%90%20OpenReward-Environment-f7e6cc)](https://openreward.ai/GeneralReasoning/Nemotron-RL-math-stack_overflow) [![Hugging Face Dataset](https://img.shields.io/badge/Hugging%20Face-Dataset-orange)](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-stack_overflow)
 
 ## Description
 
@@ -18,14 +18,11 @@ This is a single-turn environment with no sandbox. No special compute resources 
 
 ## License
 
-[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+[MIT](https://opensource.org/licenses/MIT). The underlying dataset is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 ## Tasks
 
-There are two splits in this environment:
-
-- **Train**: 436,306 tasks (one ambiguous dataset row is left out)
-- **Validation**: 30 tasks
+There are 436,306 tasks in the `train` split (one ambiguous dataset row is left out) and 30 in `validation`.
 
 Each task presents a math problem sourced from Stack Overflow and requires the agent to provide a final answer.
 
@@ -33,10 +30,11 @@ Each task presents a math problem sourced from Stack Overflow and requires the a
 
 This is a single-turn environment with binary reward:
 
-- **1.0** — Correct answer (mathematically equivalent to the reference; for a question that asks for any one example or counterexample, any answer that satisfies the question)
-- **0.0** — Incorrect answer
+- **1.0**: Correct answer (mathematically equivalent to the reference; for a question that asks for any one example or counterexample, any answer that satisfies the question)
+- **0.0**: Incorrect answer
+- **-0.1**: A repeat submission after the answer was graded (only the first graded submission is rewarded)
 
-Grading is performed by gpt-5-mini, which evaluates mathematical equivalence across different representations (e.g., `5/9` = `0.555...` = `\boxed{5/9}`). The grader sees the question as well as the reference, so that when the question admits many correct answers (e.g. "provide a counterexample") it checks the student's answer against the question rather than against the single reference. Includes a retry loop (3 attempts; the second and third use low reasoning effort) for robust evaluation. If the grader replies without a verdict on every attempt, the submission is not graded: the agent is told to resubmit, the episode continues, and the attempt does not count. If every attempt fails with an API error, the tool call raises.
+Grading is performed by gpt-5-mini, which evaluates mathematical equivalence across different representations (e.g., `5/9` = `0.555...` = `\boxed{5/9}`). The grader sees the question as well as the reference, so that when the question admits many correct answers (e.g. "provide a counterexample") it checks the student's answer against the question rather than against the single reference. Includes a retry loop (3 attempts; the second and third use low reasoning effort). If the grader replies without a verdict on every attempt, the submission is not graded: the agent is told to resubmit, the episode continues, and the attempt does not count. If every attempt fails with an API error, the tool call raises.
 
 ## Data
 
@@ -53,10 +51,6 @@ Source: [nvidia/Nemotron-RL-math-stack_overflow](https://huggingface.co/datasets
 ## Time Horizon
 
 Nemotron-RL-Math-Stack-Overflow is a single-turn environment. The agent receives a math problem and submits one answer for a total of one tool call.
-
-## Environment Difficulty
-
-The dataset covers a wide range of mathematical difficulty, from basic arithmetic to advanced topics found on Stack Overflow.
 
 ## Other Environment Requirements
 
